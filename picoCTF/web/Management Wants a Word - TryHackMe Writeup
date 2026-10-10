@@ -1,0 +1,86 @@
+# Management Wants a Word - TryHackMe Writeup
+
+## 📌 Challenge Overview
+
+* **Category:** Digital Forensics / Windows Forensics / Cryptography
+* **Difficulty:** Hard
+* **Points:** 120
+* **Platform:** TryHackMe (Hacker Holidays Series)
+
+---
+
+## 📖 Scenario & Background
+
+Housekeeping discovered a guest's laptop left behind in Room 214 after an early checkout. The room was registered under the name **"Vera"**. Before wiping the machine for the next guest, the IT department pulled a full triage image of the laptop.
+
+Our task as a forensics analyst is to investigate the artifacts scattered across Vera's machine, chain the evidence together, recover hidden credentials, unlock her encrypted storage, and uncover what she was hiding to retrieve the final flag.
+
+---
+
+## 💡 Social Media / Clues Breakdown
+
+A post from `@0xMia` provided critical hints:
+> *"ok so apparently a browser will remember things for you that you never told anyone else 💀 not every hidden file needs a password cracker, some of them just need a really good memory also why did Patch tell me this version number 1.26.29 idk what it means :( #HackerHolidays"*
+
+### Key Artifact Clues:
+1. **Browser Memory / Saved Passwords:** Web browser credentials stored via Windows DPAPI.
+2. **Version `1.26.29`:** Refers to the specific software version of **VeraCrypt** (released for disk/container encryption).
+
+---
+
+## 🛠️ Step-by-Step Walkthrough
+
+### Step 1: Extracting User Password Hashes (SAM & SYSTEM)
+1. Locate the registry hives within the triage image:
+   - `C:\Windows\System32\config\SAM`
+   - `C:\Windows\System32\config\SYSTEM`
+2. Extract the NTLM hash for user `Vera` or `minivera` using `impacket-secretsdump` or `mimikatz`:
+```bash
+   secretsdump.py -sam SAM -system SYSTEM LOCAL
+```
+3. Crack the resulting NTLM hash using Hashcat or John the Ripper to obtain Vera's Windows user account password.
+
+---
+
+### Step 2: Decrypting Chrome Saved Passwords via DPAPI
+
+1. Navigate to the user's Chrome data directory:
+   `C:\Users\Vera\AppData\Local\Google\Chrome\User Data\`
+2. Locate the following key files:
+   * `Local State` (contains the encrypted DPAPI Master Key for Chrome)
+   * `Default/Login Data` (SQLite database containing saved URLs and encrypted passwords)
+3. Using Vera's NT Hash and MasterKey GUID from `AppData\Roaming\Microsoft\Protect\<SID>\`, decrypt the DPAPI Master Key:
+```bash
+   python3 dpapi_unprotect.py -masterkey <MASTERKEY_FILE> -sid <USER_SID> -password <VERA_PASSWORD>
+```
+4. Decrypt the AES encryption key from `Local State` using the DPAPI key.
+5. Query the `Login Data` SQLite database and decrypt the saved browser password:
+   * **Recovered Password:** `Wh4t1sV3raD0inG0nTh1sH0st`
+
+---
+
+### Step 3: Mounting and Decrypting the VeraCrypt Volume
+
+1. Locate the encrypted file container (e.g., `backup` or `vault.hc`) on the disk image.
+2. The version hint (`1.26.29`) points to **VeraCrypt**.
+3. Mount the container using VeraCrypt or Linux `cryptsetup` with the recovered password:
+```bash
+   veracrypt --text --mount /path/to/container /mnt/veracrypt1 --password "Wh4t1sV3raD0inG0nTh1sH0st"
+```
+4. Access the mounted volume to find the hidden flag file.
+
+---
+
+## 🚩 Flag
+
+```text
+THM{1t_w4s_V3r4_A11_Al0ng?!}
+```
+
+---
+
+## 🎯 Summary & Key Takeaways
+
+1. **Windows Security:** User credentials stored locally in the registry can lead to DPAPI Master Key decryption if user passwords are compromised.
+2. **DPAPI Mechanics:** Chrome relies on Windows DPAPI to secure local encryption keys used to protect saved passwords in `Login Data`.
+3. **Encrypted Containers:** Software versioning numbers in forensic investigations often point directly to specific encryption tools like VeraCrypt.
